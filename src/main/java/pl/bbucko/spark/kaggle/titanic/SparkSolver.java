@@ -1,4 +1,4 @@
-package com.sabre.spark.helloworld;
+package pl.bbucko.spark.kaggle.titanic;
 
 import lombok.AllArgsConstructor;
 import lombok.Value;
@@ -11,7 +11,7 @@ import org.apache.spark.sql.SparkSession;
 
 import java.io.Serializable;
 
-public class WordCount {
+public class SparkSolver {
 
 
     public static void main(String[] args) throws Exception {
@@ -53,7 +53,7 @@ public class WordCount {
                 });
 
         Dataset<Row> peopleDF = spark.createDataFrame(passengerRDD, Passenger.class);
-//        peopleDF.createOrReplaceTempView("people");
+
         peopleDF.printSchema();
         peopleDF.show();
 
