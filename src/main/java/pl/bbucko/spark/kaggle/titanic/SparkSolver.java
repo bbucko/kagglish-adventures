@@ -1,18 +1,43 @@
 package pl.bbucko.spark.kaggle.titanic;
 
-import lombok.AllArgsConstructor;
-import lombok.Value;
 import org.apache.spark.SparkContext;
-import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
+import org.apache.spark.ml.classification.LogisticRegression;
+import org.apache.spark.ml.classification.LogisticRegressionModel;
+import org.apache.spark.ml.linalg.SQLDataTypes;
+import org.apache.spark.ml.linalg.Vector;
+import org.apache.spark.ml.linalg.Vectors;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.api.java.UDF1;
+import org.apache.spark.sql.api.java.UDF3;
+import org.apache.spark.sql.types.DataTypes;
 
-import java.io.Serializable;
+import java.util.HashMap;
+import java.util.Map;
+
+import static org.apache.spark.sql.functions.callUDF;
+import static org.apache.spark.sql.functions.col;
 
 public class SparkSolver {
 
+    final private static Map<String, String> sexMap = new HashMap<>();
+
+    static {
+        sexMap.put("male", "0");
+        sexMap.put("female", "1");
+    }
+
+
+    final private static Map<String, String> embarkedMap = new HashMap<>();
+
+    static {
+        embarkedMap.put("S", "0");
+        embarkedMap.put("C", "1");
+        embarkedMap.put("N", "2");
+        embarkedMap.put("Q", "3");
+    }
 
     public static void main(String[] args) throws Exception {
         final SparkSession spark = SparkSession
@@ -24,73 +49,56 @@ public class SparkSolver {
         final SparkContext sc = spark.sparkContext();
         final JavaSparkContext context = new JavaSparkContext(sc);
 
-        Dataset<Row> passengerCSV = spark
+        Dataset<Row> trainData = spark
                 .read()
                 .option("header", true)
                 .option("inferSchema", true)
-                .csv("src/test/resources/test.csv");
+                .csv("src/test/resources/train.csv");
 
-        passengerCSV.printSchema();
+        //Calculate median
+        double median = trainData.stat().approxQuantile("Age", new double[]{0.5}, 0.25)[0];
+        //cleanup trainData
+        trainData = trainData.na().fill(median, new String[]{"Age"})
+                .na().fill("S", new String[]{"Embarked"})
+                .na().replace("Sex", sexMap)
+                .na().replace("Embarked", embarkedMap);
 
-        double median = passengerCSV.stat().approxQuantile("Age", new double[]{0.5}, 0.25)[0];
-        passengerCSV = passengerCSV.na().fill(median, new String[]{"Age"});
+        trainData.sparkSession().udf().register("featuresUDT", (UDF3<Double, String, String, Vector>) SparkSolver::toVec, SQLDataTypes.VectorType());
+        trainData.sparkSession().udf().register("labelUDT", (UDF1<Integer, Double>) Double::valueOf, DataTypes.DoubleType);
 
-        final JavaRDD<Passenger> passengerRDD = passengerCSV
-                .javaRDD()
-                .map(line -> {
-                    final int passengerId = line.getInt(0);
-                    final int pclass = line.getInt(1);
-                    final String name = line.getString(2);
-                    final boolean sex = line.getString(3).equals("male");
-                    final double age = line.getDouble(4);
-                    final int sibSp = line.getInt(5);
-                    final int parch = line.getInt(6);
-                    final String ticket = line.getString(7);
-                    final double fare = line.getDouble(8);
-                    final String cabin = line.getString(9);
-                    final int embarked = embarked(line.getString(10));
-                    return new Passenger(passengerId, pclass, name, sex, age, sibSp, parch, ticket, fare, cabin, embarked);
-                });
+        trainData.show();
 
-        Dataset<Row> peopleDF = spark.createDataFrame(passengerRDD, Passenger.class);
+        final Dataset<Row> training = trainData
+                .withColumn("features", callUDF("featuresUDT", col("Age"), col("Sex"), col("Embarked")))
+                .withColumn("label", callUDF("labelUDT", col("Survived")))
+                .select("features", "label");
 
-        peopleDF.printSchema();
-        peopleDF.show();
+        final LogisticRegression lr = new LogisticRegression();
+        final LogisticRegressionModel model = lr.fit(training);
+        System.out.println("LogisticRegression parameters:\n" + lr.explainParams() + "\n");
+
+        final Dataset<Row> testData = spark
+                .read()
+                .option("header", true)
+                .option("inferSchema", true)
+                .csv("src/test/resources/test.csv")
+                .na().fill(median, new String[]{"Age"})
+                .na().fill("S", new String[]{"Embarked"})
+                .na().replace("Sex", sexMap)
+                .na().replace("Embarked", embarkedMap)
+                .withColumn("features", callUDF("featuresUDT", col("Age"), col("Sex"), col("Embarked")))
+                .withColumn("label", col("PassengerId"))
+                .select("features", "label");
+
+        Dataset<Row> results = model.transform(testData);
+
+        results.show();
 
         context.stop();
     }
 
-    private static int embarked(String string) {
-        switch (string) {
-            case "C":
-                return 0;
-            case "S":
-                return 1;
-            case "Q":
-                return 2;
-            case "N":
-                return 3;
-        }
-        return 0;
+    private static Vector toVec(Double age, String sex, String embarked) {
+        return Vectors.dense(age, Double.valueOf(sex), Double.valueOf(embarked));
     }
-
-
-    @Value
-    @AllArgsConstructor
-    public static class Passenger implements Serializable {
-        private final int passengerId;
-        private final int pclass;
-        private final String name;
-        private final boolean sex;
-        private final double age;
-        private final int sibSp;
-        private final int parch;
-        private final String ticket;
-        private final double fare;
-        private final String cabin;
-        private final int embarked;
-
-    }
-
 }
 
