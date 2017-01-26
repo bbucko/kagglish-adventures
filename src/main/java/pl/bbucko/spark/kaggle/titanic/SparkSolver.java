@@ -1,5 +1,6 @@
 package pl.bbucko.spark.kaggle.titanic;
 
+import com.google.common.collect.ImmutableMap;
 import org.apache.spark.SparkContext;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.ml.classification.LogisticRegression;
@@ -11,33 +12,13 @@ import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.api.java.UDF1;
-import org.apache.spark.sql.api.java.UDF3;
+import org.apache.spark.sql.api.java.UDF4;
 import org.apache.spark.sql.types.DataTypes;
-
-import java.util.HashMap;
-import java.util.Map;
 
 import static org.apache.spark.sql.functions.callUDF;
 import static org.apache.spark.sql.functions.col;
 
 public class SparkSolver {
-
-    final private static Map<String, String> sexMap = new HashMap<>();
-
-    static {
-        sexMap.put("male", "0");
-        sexMap.put("female", "1");
-    }
-
-
-    final private static Map<String, String> embarkedMap = new HashMap<>();
-
-    static {
-        embarkedMap.put("S", "0");
-        embarkedMap.put("C", "1");
-        embarkedMap.put("N", "2");
-        embarkedMap.put("Q", "3");
-    }
 
     public static void main(String[] args) throws Exception {
         final SparkSession spark = SparkSession
@@ -57,19 +38,20 @@ public class SparkSolver {
 
         //Calculate median
         double median = trainData.stat().approxQuantile("Age", new double[]{0.5}, 0.25)[0];
+
         //cleanup trainData
         trainData = trainData.na().fill(median, new String[]{"Age"})
                 .na().fill("S", new String[]{"Embarked"})
-                .na().replace("Sex", sexMap)
-                .na().replace("Embarked", embarkedMap);
+                .na().replace("Sex", ImmutableMap.of("male", "0", "female", "1"))
+                .na().replace("Embarked", ImmutableMap.of("S", "0", "C", "1", "N", "2", "Q", "3"));
 
-        trainData.sparkSession().udf().register("featuresUDT", (UDF3<Double, String, String, Vector>) SparkSolver::toVec, SQLDataTypes.VectorType());
+        trainData.sparkSession().udf().register("featuresUDT", (UDF4<Double, String, String, Double, Vector>) SparkSolver::toVec, SQLDataTypes.VectorType());
         trainData.sparkSession().udf().register("labelUDT", (UDF1<Integer, Double>) Double::valueOf, DataTypes.DoubleType);
 
         trainData.show();
 
         final Dataset<Row> training = trainData
-                .withColumn("features", callUDF("featuresUDT", col("Age"), col("Sex"), col("Embarked")))
+                .withColumn("features", callUDF("featuresUDT", col("Age"), col("Sex"), col("Embarked"), col("Fare")))
                 .withColumn("label", callUDF("labelUDT", col("Survived")))
                 .select("features", "label");
 
@@ -84,9 +66,9 @@ public class SparkSolver {
                 .csv("src/test/resources/test.csv")
                 .na().fill(median, new String[]{"Age"})
                 .na().fill("S", new String[]{"Embarked"})
-                .na().replace("Sex", sexMap)
-                .na().replace("Embarked", embarkedMap)
-                .withColumn("features", callUDF("featuresUDT", col("Age"), col("Sex"), col("Embarked")))
+                .na().replace("Sex", ImmutableMap.of("male", "0", "female", "1"))
+                .na().replace("Embarked", ImmutableMap.of("S", "0", "C", "1", "N", "2", "Q", "3"))
+                .withColumn("features", callUDF("featuresUDT", col("Age"), col("Sex"), col("Embarked"), col("Fare")))
                 .withColumn("label", col("PassengerId"))
                 .select("features", "label");
 
@@ -97,8 +79,8 @@ public class SparkSolver {
         context.stop();
     }
 
-    private static Vector toVec(Double age, String sex, String embarked) {
-        return Vectors.dense(age, Double.valueOf(sex), Double.valueOf(embarked));
+    private static Vector toVec(Double age, String sex, String embarked, Double fare) {
+        return Vectors.dense(age, Double.valueOf(sex), Double.valueOf(embarked), fare);
     }
 }
 
