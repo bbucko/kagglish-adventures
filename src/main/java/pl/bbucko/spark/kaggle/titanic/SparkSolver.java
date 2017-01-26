@@ -11,6 +11,7 @@ import org.apache.spark.ml.linalg.Vectors;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.UDFRegistration;
 import org.apache.spark.sql.api.java.UDF1;
 import org.apache.spark.sql.api.java.UDF4;
 import org.apache.spark.sql.types.DataTypes;
@@ -23,7 +24,7 @@ public class SparkSolver {
     public static void main(String[] args) throws Exception {
         final SparkSession spark = SparkSession
                 .builder()
-                .appName("Java Spark SQL basic example")
+                .appName("TitanicSparkSolver")
                 .master("local")
                 .getOrCreate();
 
@@ -45,8 +46,9 @@ public class SparkSolver {
                 .na().replace("Sex", ImmutableMap.of("male", "0", "female", "1"))
                 .na().replace("Embarked", ImmutableMap.of("S", "0", "C", "1", "N", "2", "Q", "3"));
 
-        trainData.sparkSession().udf().register("featuresUDT", (UDF4<Double, String, String, Double, Vector>) SparkSolver::toVec, SQLDataTypes.VectorType());
-        trainData.sparkSession().udf().register("labelUDT", (UDF1<Integer, Double>) Double::valueOf, DataTypes.DoubleType);
+        final UDFRegistration udf = trainData.sparkSession().udf();
+        udf.register("featuresUDT", (UDF4<Double, String, String, Double, Vector>) SparkSolver::toVec, SQLDataTypes.VectorType());
+        udf.register("labelUDT", (UDF1<Integer, Double>) Double::valueOf, DataTypes.DoubleType);
 
         trainData.show();
 

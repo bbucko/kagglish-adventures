@@ -18,7 +18,7 @@ public class PipelineSparkSolver {
     public static void main(String[] args) throws Exception {
         final SparkSession spark = SparkSession
                 .builder()
-                .appName("Java Spark SQL basic example")
+                .appName("TitanicPipelineSolver")
                 .master("local")
                 .getOrCreate();
 
@@ -54,7 +54,6 @@ public class PipelineSparkSolver {
                 .setOutputCol("features");
 
         double[] splits = {Double.NEGATIVE_INFINITY, 0, 15, 100, Double.POSITIVE_INFINITY};
-
 
         Bucketizer fareBucketizer = new Bucketizer()
                 .setInputCol("Fare")
